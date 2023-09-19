@@ -1,10 +1,24 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { InputGroup, Modal, Container, Form, Button, } from 'react-bootstrap'
 
+function fmtTimestamp(ts) {
+    const formattedDate = new Intl.DateTimeFormat('en-US', {
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    }).format(new Date(ts));
+
+    return formattedDate;
+}
 
 function UserSelect(props) {
     const [user, setUser] = useState('');
     const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [showFailModal, setShowFailModal] = useState(false);
 
     function handleInputChange(e) {
         setUser(e.target.value)
@@ -17,12 +31,16 @@ function UserSelect(props) {
     const handleOpenSuccessModal = () => setShowSuccessModal(true)
     const handleCloseSuccessModal = () => setShowSuccessModal(false)
 
+    const handleOpenFailModal = () => setShowFailModal(true)
+    const handleCloseFailModal = () => setShowFailModal(false)
+
     function handleSubmit(e) {
         e.preventDefault();
         console.log(`username: ${user}`);
         if (!verifyUser()) {
             // no good
             console.log("Error: Username was empty")
+            handleOpenFailModal()
         } else {
             // go to chat room
             console.log(`Success: Username set to ${user}`)
@@ -32,28 +50,32 @@ function UserSelect(props) {
 
     function gotoChat() {
         handleCloseSuccessModal()
-        console.log("callback triggered")
-        props.setUser(user)
+        console.log("Going to the Chat App")
+        props.setUser(user.trim())
     }
 
     return (
         <Container style={{ width: '50%' }}>
             <Form onSubmit={handleSubmit}>
-                <Form.Label>Display Name</Form.Label>
                 <Form.Group style={{ display: 'flex' }}>
-                    <Form.Control
-                        type="text"
-                        id="display-name"
-                        placeholder="Enter your display name..."
-                        onChange={(e) => handleInputChange(e)}
-                    />
-                    <Button
-                        type="submit"
-                        style={{ display: 'flex', whiteSpace: 'nowrap' }} variant="success"
-                        value={user}
-                    >
-                        Enter Chat
-                    </Button>
+                    <InputGroup>
+                        <InputGroup.Text>
+                            Display Name
+                        </InputGroup.Text>
+                        <Form.Control
+                            type="text"
+                            id="display-name"
+                            placeholder="Enter your display name..."
+                            onChange={(e) => handleInputChange(e)}
+                        />
+                        <Button
+                            type="submit"
+                            variant="success"
+                            value={user}
+                        >
+                            Enter Chat
+                        </Button>
+                    </InputGroup>
                 </Form.Group>
             </Form>
 
@@ -70,10 +92,31 @@ function UserSelect(props) {
                     </Modal.Title>
                 </Modal.Header>
                 <Modal.Body>
-                    <p> You have logged in to the chat room with the display name: "{user}".</p>
+                    <p>You have logged in to the chat room with the display name:</p>
+                    <p>{user}</p>
                 </Modal.Body>
                 <Modal.Footer>
                     <Button variant="success" onClick={gotoChat}>Continue to Chat Room</Button>
+                </Modal.Footer>
+            </Modal>
+
+            <Modal
+                show={showFailModal}
+                onHide={handleCloseFailModal}
+                closeVariant='danger'
+                closeButton='true'
+                closeLabel='Go Back'
+            >
+                <Modal.Header>
+                    <Modal.Title>
+                        Login Failed
+                    </Modal.Title>
+                </Modal.Header>
+                <Modal.Body>
+                    <p> Your username can not be empty! </p>
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="danger" onClick={handleCloseFailModal}>Close</Button>
                 </Modal.Footer>
             </Modal>
         </Container >
@@ -82,22 +125,82 @@ function UserSelect(props) {
 
 function ChatRoom(props) {
     const [user, setUser] = useState(props.user)
+    const [userIP, setUserIP] = useState(0)
+    const [chatData, setChatData] = useState([])
     const [msg, setMsg] = useState('')
 
-    const handleSubmit = (e) => {
+    const appendMsg = (newMsg) => setChatData((prevChatData => [...prevChatData, newMsg]));
+
+    const fetchMsgs = async () => {
+        try {
+            const response = await fetch('/livechat/api/fetch-msgs', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({})
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setChatData(data);
+            } else {
+                console.log("Failed to fetch data");
+            }
+        } catch (error) {
+            console.log('Error: fetchMsg failed:', error);
+        }
+    }
+
+    useEffect(() => {
+        fetchMsgs();
+    }, [])
+
+    // Grab user IP address when the page loads
+    useEffect(() => {
+        fetch('https://api.ipify.org?format=json')
+            .then(response => response.json())
+            .then(data => setUserIP(data.ip))
+            .catch(error => console.log(error))
+    })
+
+    const sendMsg = async (e) => {
+        console.log("Sending message to the server")
         e.preventDefault();
+        if (msg.trim().length !== 0) {
+            try {
+                const response = await fetch('/livechat/api/send-msg', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: user,
+                        msg: msg,
+                        userIP: userIP,
+                    })
+                });
+
+                if (response.ok) {
+                    setMsg('')
+                    fetchMsgs()
+                } else {
+                    console.log('Failed to send message to server')
+                }
+            } catch (error) {
+                console.log("Error: sendMSg failed:", error);
+            }
+        }
         console.log(`Sending message: ${msg}`);
         setMsg('');
     }
 
-    const handleInputChange = (e) => {
-        setMsg(e.target.value)
-    }
+    const handleInputChange = (e) => setMsg(e.target.value)
 
     return (
         <Container style={{ width: '80%' }}>
             <h3> Welcome, {user}!</h3>
-            <Form onSubmit={(e) => handleSubmit(e)}>
+            <Form onSubmit={(e) => sendMsg(e)}>
                 <Form.Control
                     as="textarea"
                     readOnly={true}
@@ -106,6 +209,7 @@ function ChatRoom(props) {
                         overflowY: 'scroll',
                         resize: 'none',
                     }}
+                    value={chatData.map((m) => `[${m.posted_on}] ${m.username}: ${m.message}`).join('\n')}
                 />
                 <InputGroup>
                     <InputGroup.Text>{user}</InputGroup.Text>
@@ -133,16 +237,13 @@ function ChatRoom(props) {
 function ChatApp() {
     const [user, setUser] = useState('')
 
-    const handleCallback = (userFromSelect) => {
+    const setSelectedUser = (userFromSelect) => {
         setUser(userFromSelect)
     }
 
-    return (
-        <>
-            {user.length === 0 ?
-                <UserSelect setUser={handleCallback} /> : <ChatRoom user={user} />}
-        </>
-    );
+    return <>
+        {user.length === 0 ? <UserSelect setUser={setSelectedUser} /> : <ChatRoom user={user} />}
+    </>
 }
 
 export default ChatApp;
