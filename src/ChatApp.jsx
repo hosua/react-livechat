@@ -1,5 +1,11 @@
 import { useState, useEffect } from 'react'
 import { InputGroup, Modal, Container, Form, Button, } from 'react-bootstrap'
+import io from 'socket.io-client'
+
+// const socket = io('http://127.0.0.1:3003')
+const socket = io('http://127.0.0.1:3003', {
+    transports: ['websocket']
+})
 
 function fmtTimestamp(ts) {
     const formattedDate = new Intl.DateTimeFormat('en-US', {
@@ -131,29 +137,29 @@ function ChatRoom(props) {
 
     const appendMsg = (newMsg) => setChatData((prevChatData => [...prevChatData, newMsg]));
 
-    const fetchMsgs = async () => {
-        try {
-            const response = await fetch('/livechat/api/fetch-msgs', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({})
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                setChatData(data);
-            } else {
-                console.log("Failed to fetch data");
-            }
-        } catch (error) {
-            console.log('Error: fetchMsg failed:', error);
-        }
-    }
-
     useEffect(() => {
-        fetchMsgs();
+        console.log(`Connecting to server...`)
+
+        socket.on("connect_error", (err) => {
+            console.log(`connect_error: ${err}`)
+        });
+
+        // connect to server
+        socket.connect();
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [])
+
+    // Ensure that message doesn't fire twice (I need to look into why this is actually working, lol)
+    useEffect(() => {
+        socket.on('message', (response) => {
+            appendMsg(response);
+        });
+        return () => {
+            socket.off('message')
+        };
     }, [])
 
     // Grab user IP address when the page loads
@@ -168,30 +174,11 @@ function ChatRoom(props) {
         console.log("Sending message to the server")
         e.preventDefault();
         if (msg.trim().length !== 0) {
-            try {
-                const response = await fetch('/livechat/api/send-msg', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        username: user,
-                        msg: msg,
-                        userIP: userIP,
-                    })
-                });
-
-                if (response.ok) {
-                    setMsg('')
-                    fetchMsgs()
-                } else {
-                    console.log('Failed to send message to server')
-                }
-            } catch (error) {
-                console.log("Error: sendMSg failed:", error);
-            }
+            socket.emit('message', {
+                username: user,
+                msg: msg,
+            });
         }
-        console.log(`Sending message: ${msg}`);
         setMsg('');
     }
 
@@ -205,11 +192,11 @@ function ChatRoom(props) {
                     as="textarea"
                     readOnly={true}
                     style={{
-                        height: '400px',
+                        height: '50vh',
                         overflowY: 'scroll',
                         resize: 'none',
                     }}
-                    value={chatData.map((m) => `[${m.posted_on}] ${m.username}: ${m.message}`).join('\n')}
+                    value={chatData.map((m) => `[${m.posted_on}] ${m.username}: ${m.msg}`).join('\n')}
                 />
                 <InputGroup>
                     <InputGroup.Text>{user}</InputGroup.Text>
